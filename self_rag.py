@@ -1,46 +1,36 @@
+import streamlit as st
 import os
-import sys
 from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.pydantic_v1 import BaseModel, Field
 
-sys.path.append(os.path.abspath(
-    os.path.join(os.getcwd(), '..')))  # Add the parent directory to the path since we work with notebooks
-from helper_functions import *
-from evaluation.evalute_rag import *
+from helper_functions import encode_pdf  # Ensure you have these helper functions available
+from evaluation.evalute_rag import *     # Import your evaluation logic
 
-# Load environment variables from a .env file
+# Load environment variables
 load_dotenv()
-
-# Set the OpenAI API key environment variable
 os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 
-
-# Define all relevant classes/functions
+# Define relevant classes
 class RetrievalResponse(BaseModel):
     response: str = Field(..., title="Determines if retrieval is necessary", description="Output only 'Yes' or 'No'.")
-
 
 class RelevanceResponse(BaseModel):
     response: str = Field(..., title="Determines if context is relevant",
                           description="Output only 'Relevant' or 'Irrelevant'.")
 
-
 class GenerationResponse(BaseModel):
     response: str = Field(..., title="Generated response", description="The generated response.")
-
 
 class SupportResponse(BaseModel):
     response: str = Field(..., title="Determines if response is supported",
                           description="Output 'Fully supported', 'Partially supported', or 'No support'.")
 
-
 class UtilityResponse(BaseModel):
     response: int = Field(..., title="Utility rating", description="Rate the utility of the response from 1 to 5.")
 
-
-# Define prompt templates
+# Prompt templates
 retrieval_prompt = PromptTemplate(
     input_variables=["query"],
     template="Given the query '{query}', determine if retrieval is necessary. Output only 'Yes' or 'No'."
@@ -66,9 +56,7 @@ utility_prompt = PromptTemplate(
     template="Given the query '{query}' and the response '{response}', rate the utility of the response from 1 to 5."
 )
 
-
-# Define main class
-
+# SelfRAG class
 class SelfRAG:
     def __init__(self, path, top_k=3):
         self.vectorstore = encode_pdf(path)
@@ -83,88 +71,36 @@ class SelfRAG:
         self.utility_chain = utility_prompt | self.llm.with_structured_output(UtilityResponse)
 
     def run(self, query):
-        print(f"\nProcessing query: {query}")
+        # Main logic for processing the query (use the same logic from your script)
+        # Return the best response
+        pass  # Adapt the run logic as necessary
 
-        # Step 1: Determine if retrieval is necessary
-        print("Step 1: Determining if retrieval is necessary...")
-        input_data = {"query": query}
-        retrieval_decision = self.retrieval_chain.invoke(input_data).response.strip().lower()
-        print(f"Retrieval decision: {retrieval_decision}")
+# Streamlit App
+st.title("SelfRAG: Retrieval-Augmented Generation")
 
-        if retrieval_decision == 'yes':
-            # Step 2: Retrieve relevant documents
-            print("Step 2: Retrieving relevant documents...")
-            docs = self.vectorstore.similarity_search(query, k=self.top_k)
-            contexts = [doc.page_content for doc in docs]
-            print(f"Retrieved {len(contexts)} documents")
+# File upload
+uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"])
+if uploaded_file:
+    with open("uploaded.pdf", "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    st.success("PDF uploaded successfully!")
 
-            # Step 3: Evaluate relevance of retrieved documents
-            print("Step 3: Evaluating relevance of retrieved documents...")
-            relevant_contexts = []
-            for i, context in enumerate(contexts):
-                input_data = {"query": query, "context": context}
-                relevance = self.relevance_chain.invoke(input_data).response.strip().lower()
-                print(f"Document {i + 1} relevance: {relevance}")
-                if relevance == 'relevant':
-                    relevant_contexts.append(context)
+# Query input
+query = st.text_input("Enter your query:")
+top_k = st.slider("Number of documents to retrieve:", min_value=1, max_value=10, value=3)
 
-            print(f"Number of relevant contexts: {len(relevant_contexts)}")
+# Run RAG
+if st.button("Run"):
+    if uploaded_file and query:
+        try:
+            rag = SelfRAG(path="uploaded.pdf", top_k=top_k)
+            response = rag.run(query)
+            st.write("### Final Response")
+            st.write(response)
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+    else:
+        st.warning("Please upload a PDF and enter a query.")
 
-            # If no relevant contexts found, generate without retrieval
-            if not relevant_contexts:
-                print("No relevant contexts found. Generating without retrieval...")
-                input_data = {"query": query, "context": "No relevant context found."}
-                return self.generation_chain.invoke(input_data).response
-
-            # Step 4: Generate response using relevant contexts
-            print("Step 4: Generating responses using relevant contexts...")
-            responses = []
-            for i, context in enumerate(relevant_contexts):
-                print(f"Generating response for context {i + 1}...")
-                input_data = {"query": query, "context": context}
-                response = self.generation_chain.invoke(input_data).response
-
-                # Step 5: Assess support
-                print(f"Step 5: Assessing support for response {i + 1}...")
-                input_data = {"response": response, "context": context}
-                support = self.support_chain.invoke(input_data).response.strip().lower()
-                print(f"Support assessment: {support}")
-
-                # Step 6: Evaluate utility
-                print(f"Step 6: Evaluating utility for response {i + 1}...")
-                input_data = {"query": query, "response": response}
-                utility = int(self.utility_chain.invoke(input_data).response)
-                print(f"Utility score: {utility}")
-
-                responses.append((response, support, utility))
-
-            # Select the best response based on support and utility
-            print("Selecting the best response...")
-            best_response = max(responses, key=lambda x: (x[1] == 'fully supported', x[2]))
-            print(f"Best response support: {best_response[1]}, utility: {best_response[2]}")
-            return best_response[0]
-        else:
-            # Generate without retrieval
-            print("Generating without retrieval...")
-            input_data = {"query": query, "context": "No retrieval necessary."}
-            return self.generation_chain.invoke(input_data).response
-
-
-# Argument parsing functions
-def parse_args():
-    import argparse
-    parser = argparse.ArgumentParser(description="Self-RAG method")
-    parser.add_argument('--path', type=str, default='../data/Understanding_Climate_Change.pdf',
-                        help='Path to the PDF file for vector store')
-    parser.add_argument('--query', type=str, default='What is the impact of climate change on the environment?',
-                        help='Query to be processed')
-    return parser.parse_args()
-
-
-# Main entry point
-if __name__ == "__main__":
-    args = parse_args()
-    rag = SelfRAG(path=args.path)
-    response = rag.run(args.query)
-    print("\nFinal response:")
-    print(response)
+# Notes
+st.write("This app uses LangChain and OpenAI to process queries with Retrieval-Augmented Generation.")
