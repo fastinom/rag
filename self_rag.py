@@ -1,16 +1,10 @@
 import streamlit as st
 import os
-from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.pydantic_v1 import BaseModel, Field
 
 from helper_functions import encode_pdf  # Ensure you have these helper functions available
-from evaluation.evalute_rag import *     # Import your evaluation logic
-
-# Load environment variables
-load_dotenv()
-os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 
 # Define relevant classes
 class RetrievalResponse(BaseModel):
@@ -78,6 +72,12 @@ class SelfRAG:
 # Streamlit App
 st.title("SelfRAG: Retrieval-Augmented Generation")
 
+# API Key Input
+api_key = st.text_input("Enter your Groq API Key:", type="password")
+if api_key:
+    os.environ["OPENAI_API_KEY"] = api_key
+    st.success("API key set successfully!")
+
 # File upload
 uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"])
 if uploaded_file:
@@ -91,7 +91,7 @@ top_k = st.slider("Number of documents to retrieve:", min_value=1, max_value=10,
 
 # Run RAG
 if st.button("Run"):
-    if uploaded_file and query:
+    if api_key and uploaded_file and query:
         try:
             rag = SelfRAG(path="uploaded.pdf", top_k=top_k)
             response = rag.run(query)
@@ -99,6 +99,8 @@ if st.button("Run"):
             st.write(response)
         except Exception as e:
             st.error(f"An error occurred: {e}")
+    elif not api_key:
+        st.warning("Please enter your Groq API Key.")
     else:
         st.warning("Please upload a PDF and enter a query.")
 
