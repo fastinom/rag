@@ -1,86 +1,106 @@
 import streamlit as st
-from groq import Groq
-import fitz  # PyMuPDF for PDF parsing
-from typing import List
+from helper_functions import (
+    encode_pdf,
+    encode_from_string,
+    answer_question_from_context,
+    read_pdf_to_string,
+    create_question_answer_from_context_chain,
+    bm25_retrieval
+)
+from rank_bm25 import BM25Okapi
 
-# Initialize the Groq client
-client = Groq()
+# Streamlit Page Setup
+st.set_page_config(page_title="PDF Summarizer with Q&A", layout="wide")
+st.title("PDF Summarizer and Q&A with Groq")
 
-# Function to extract text from uploaded PDFs
-def extract_text_from_pdfs(uploaded_files) -> List[str]:
-    documents = []
-    for uploaded_file in uploaded_files:
-        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-            text = ""
-            for page in doc:
-                text += page.get_text()
-            documents.append(text)
-    return documents
+# State Variables
+if "vectorstore" not in st.session_state:
+    st.session_state["vectorstore"] = None
 
-# Function to retrieve relevant context from PDFs
-def retrieve_context(query: str, documents: List[str]) -> List[str]:
-    # Simplified retrieval: search for query keywords in documents
-    relevant_context = []
-    for doc in documents:
-        if query.lower() in doc.lower():
-            relevant_context.append(doc[:500])  # Extract the first 500 characters as context
-    return relevant_context
+if "bm25" not in st.session_state:
+    st.session_state["bm25"] = None
 
-# Function to generate response using Groq's API
-def generate_response(context: str, query: str) -> str:
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": query},
-        {"role": "assistant", "content": f"Relevant context: {context}"},
-    ]
+if "cleaned_texts" not in st.session_state:
+    st.session_state["cleaned_texts"] = None
 
-    # Call the Groq API
-    completion = client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=messages,
-        temperature=1,
-        max_tokens=1024,
-        top_p=1,
-        stream=False,  # Set to False for single response
-        stop=None,
+# Upload PDF
+uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+
+# PDF Processing
+if uploaded_file:
+    st.write("Processing the PDF...")
+    pdf_path = uploaded_file.name
+    with open(pdf_path, "wb") as f:
+        f.write(uploaded_file.read())
+
+    # Extract text from PDF
+    pdf_content = read_pdf_to_string(pdf_path)
+
+    # Encode the PDF into vector store
+    with st.spinner("Encoding PDF into vector store..."):
+        st.session_state["vectorstore"] = encode_pdf(pdf_path)
+        st.success("Vector store created!")
+
+    # Prepare for BM25 retrieval
+    with st.spinner("Preparing BM25 retriever..."):
+        chunk_size = 1000
+        chunk_overlap = 200
+        st.session_state["bm25"] = BM25Okapi(pdf_content.split())
+        st.session_state["cleaned_texts"] = pdf_content.split()
+
+# Summarize PDF
+if st.session_state["vectorstore"]:
+    st.header("PDF Summarization")
+
+    # Summarize entire PDF or a given section
+    summarization_prompt = st.text_area(
+        "Enter a summarization prompt (optional):",
+        value="Summarize the uploaded document."
     )
-    
-    # Access the content of the response
-    response = completion.choices[0].message.content
-    return response
+    if st.button("Summarize"):
+        chain = create_question_answer_from_context_chain()
+        context = st.session_state["vectorstore"].similarity_search(summarization_prompt, k=5)
+        context_text = " ".join([doc.page_content for doc in context])
+        answer = answer_question_from_context(
+            summarization_prompt, context_text, chain
+        )
+        st.write("**Summary:**")
+        st.write(answer["answer"])
 
-# Streamlit App
-st.title("RAG System with PDF Upload and Groq's Llama Model")
-st.write("Upload PDFs, retrieve context, and generate responses using Groq's API.")
+# Question-Answering
+if st.session_state["vectorstore"]:
+    st.header("Question Answering")
 
-# Upload PDF files
-uploaded_files = st.file_uploader("Upload PDF files", type=["pdf"], accept_multiple_files=True)
+    # Enter question
+    question = st.text_input("Ask a question about the document:")
 
-if uploaded_files:
-    # Extract text from PDFs
-    st.write("### Extracting text from uploaded PDFs...")
-    documents = extract_text_from_pdfs(uploaded_files)
-    st.write(f"Extracted text from {len(documents)} document(s).")
+    if st.button("Get Answer"):
+        chain = create_question_answer_from_context_chain()
+        # Retrieve context for the question
+        with st.spinner("Retrieving context..."):
+            context = st.session_state["vectorstore"].similarity_search(question, k=5)
+            context_text = " ".join([doc.page_content for doc in context])
 
-    # Input query
-    query = st.text_input("Enter your query:", "")
+        # Generate answer using Groq
+        with st.spinner("Generating answer..."):
+            answer = answer_question_from_context(question, context_text, chain)
+            st.write("**Answer:**")
+            st.write(answer["answer"])
+            st.write("**Context:**")
+            st.write(answer["context"])
 
-    if query:
-        # Retrieve context
-        st.write("### Retrieving relevant context...")
-        context = retrieve_context(query, documents)
-        st.write("#### Retrieved Context:")
-        for i, ctx in enumerate(context, 1):
-            st.write(f"{i}. {ctx}")
+# BM25 Search
+if st.session_state["bm25"]:
+    st.header("BM25 Context Retrieval")
 
-        if context:
-            # Generate response
-            st.write("### Generating response...")
-            combined_context = "\n".join(context)
-            response = generate_response(combined_context, query)
+    bm25_query = st.text_input("Enter a query for BM25 search:")
 
-            # Display the response
-            st.write("#### Response:")
-            st.write(response)
-        else:
-            st.write("No relevant context found in the uploaded documents.")
+    if st.button("Retrieve BM25 Context"):
+        with st.spinner("Searching with BM25..."):
+            bm25_results = bm25_retrieval(
+                st.session_state["bm25"], st.session_state["cleaned_texts"], bm25_query
+            )
+            st.write("**Top Contexts:**")
+            for i, text in enumerate(bm25_results):
+                st.write(f"**Chunk {i + 1}:**")
+                st.write(text)
