@@ -44,8 +44,9 @@ def generate_response(context: str, query: str) -> str:
         stream=False,  # Set to False for single response
         stop=None,
     )
-    # Extract and return the full response
-    response = completion.choices[0].message["content"]
+    
+    # Access the content of the response
+    response = completion.choices[0].message.content
     return response
 
 # Streamlit App
