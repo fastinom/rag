@@ -1,90 +1,85 @@
 import streamlit as st
 from groq import Groq
-from helper_functions import encode_pdf  # Ensure this function is implemented
+import fitz  # PyMuPDF for PDF parsing
+from typing import List
 
-# Custom Groq client wrapper
-class GroqClient:
-    def __init__(self, api_key, model, temperature=1, max_tokens=1024, top_p=1):
-        self.client = Groq(api_key=api_key)
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.top_p = top_p
+# Initialize the Groq client
+client = Groq()
 
-    def generate_response(self, prompt):
-        try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                top_p=self.top_p,
-                stream=False,  # Disable streaming for simplicity
-                stop=None,
-            )
-            response = "".join(
-                chunk.choices[0].delta.content or "" for chunk in completion
-            )
-            return response
-        except Exception as e:
-            raise Exception(f"Groq API Error: {e}")
+# Function to extract text from uploaded PDFs
+def extract_text_from_pdfs(uploaded_files) -> List[str]:
+    documents = []
+    for uploaded_file in uploaded_files:
+        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            documents.append(text)
+    return documents
 
-# SelfRAG class
-class SelfRAG:
-    def __init__(self, path, top_k=3, groq_client=None):
-        self.vectorstore = encode_pdf(path)
-        self.top_k = top_k
-        self.groq_client = groq_client
+# Function to retrieve relevant context from PDFs
+def retrieve_context(query: str, documents: List[str]) -> List[str]:
+    # Simplified retrieval: search for query keywords in documents
+    relevant_context = []
+    for doc in documents:
+        if query.lower() in doc.lower():
+            relevant_context.append(doc[:500])  # Extract the first 500 characters as context
+    return relevant_context
 
-    def run(self, query):
-        st.write("Processing query:", query)
+# Function to generate response using Groq's API
+def generate_response(context: str, query: str) -> str:
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": query},
+        {"role": "assistant", "content": f"Relevant context: {context}"},
+    ]
 
-        # Use retrieval logic as needed (e.g., self.vectorstore.similarity_search)
-        # For simplicity, we'll focus on direct response generation
-        input_prompt = f"Query: {query}\n\nGenerate a response:"
-        response = self.groq_client.generate_response(input_prompt)
-        return response
+    # Call the Groq API
+    completion = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=messages,
+        temperature=1,
+        max_tokens=1024,
+        top_p=1,
+        stream=False,  # Set to False for single response
+        stop=None,
+    )
+    # Extract and return the full response
+    response = completion.choices[0].message["content"]
+    return response
 
-# Streamlit app
-st.title("SelfRAG with Groq's Llama3 Model")
+# Streamlit App
+st.title("RAG System with PDF Upload and Groq's Llama Model")
+st.write("Upload PDFs, retrieve context, and generate responses using Groq's API.")
 
-# API Key Input
-st.sidebar.title("Configuration")
-api_key = st.sidebar.text_input("Enter your Groq API Key:", type="password")
-if not api_key:
-    st.error("Please enter your Groq API Key in the sidebar.")
+# Upload PDF files
+uploaded_files = st.file_uploader("Upload PDF files", type=["pdf"], accept_multiple_files=True)
 
-# File upload
-uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"])
-if uploaded_file:
-    with open("uploaded.pdf", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.success("PDF uploaded successfully!")
+if uploaded_files:
+    # Extract text from PDFs
+    st.write("### Extracting text from uploaded PDFs...")
+    documents = extract_text_from_pdfs(uploaded_files)
+    st.write(f"Extracted text from {len(documents)} document(s).")
 
-# Query input
-query = st.text_input("Enter your query:")
-top_k = st.slider("Number of documents to retrieve:", min_value=1, max_value=10, value=3)
+    # Input query
+    query = st.text_input("Enter your query:", "")
 
-# Run RAG
-if st.button("Run"):
-    if uploaded_file and query and api_key:
-        try:
-            # Initialize Groq client and SelfRAG
-            groq_client = GroqClient(api_key=api_key, model="llama3-8b-8192")
-            rag = SelfRAG(path="uploaded.pdf", top_k=top_k, groq_client=groq_client)
-            
-            # Process the query
-            response = rag.run(query)
-            
+    if query:
+        # Retrieve context
+        st.write("### Retrieving relevant context...")
+        context = retrieve_context(query, documents)
+        st.write("#### Retrieved Context:")
+        for i, ctx in enumerate(context, 1):
+            st.write(f"{i}. {ctx}")
+
+        if context:
+            # Generate response
+            st.write("### Generating response...")
+            combined_context = "\n".join(context)
+            response = generate_response(combined_context, query)
+
             # Display the response
-            st.write("### Final Response")
+            st.write("#### Response:")
             st.write(response)
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-    elif not api_key:
-        st.error("Please set the API Key in the sidebar.")
-    else:
-        st.warning("Please upload a PDF and enter a query.")
-
-# Notes
-st.write("This app uses Groq's Llama3-8b-8192 model for Retrieval-Augmented Generation.")
+        else:
+            st.write("No relevant context found in the uploaded documents.")
