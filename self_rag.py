@@ -1,109 +1,56 @@
 import streamlit as st
 import os
-import requests
+from groq import Groq
 from langchain.prompts import PromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
+from helper_functions import encode_pdf  # Ensure helper_functions contains `encode_pdf`
 
-from helper_functions import encode_pdf  # Ensure these helper functions are correctly implemented
-
-# Custom ChatOpenAI for Groq API compatibility
-class CustomChatOpenAI:
-    def __init__(self, model, max_tokens=1000, temperature=0):
-        self.api_base = "https://api.groq.com/v1"  # Replace with the correct Groq endpoint
-        self.api_key = os.getenv("GROQ_API_KEY")
+# Custom Groq client wrapper
+class GroqClient:
+    def __init__(self, model, temperature=1, max_tokens=1024, top_p=1):
+        self.client = Groq()
         self.model = model
-        self.max_tokens = max_tokens
         self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.top_p = top_p
 
-        # Custom headers for Groq
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-    def call_api(self, prompt):
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-        }
-        response = requests.post(
-            f"{self.api_base}/chat/completions",
-            headers=self.headers,
-            json=payload,
-        )
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            raise Exception(
-                f"API Error: {response.status_code}, {response.json().get('error')}"
+    def generate_response(self, prompt):
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                top_p=self.top_p,
+                stream=False,  # Disable streaming for simplicity
+                stop=None,
             )
-
-
-# Define relevant classes for LangChain
-class RetrievalResponse(BaseModel):
-    response: str = Field(..., title="Determines if retrieval is necessary", description="Output only 'Yes' or 'No'.")
-
-class RelevanceResponse(BaseModel):
-    response: str = Field(..., title="Determines if context is relevant",
-                          description="Output only 'Relevant' or 'Irrelevant'.")
-
-class GenerationResponse(BaseModel):
-    response: str = Field(..., title="Generated response", description="The generated response.")
-
-class SupportResponse(BaseModel):
-    response: str = Field(..., title="Determines if response is supported",
-                          description="Output 'Fully supported', 'Partially supported', or 'No support'.")
-
-class UtilityResponse(BaseModel):
-    response: int = Field(..., title="Utility rating", description="Rate the utility of the response from 1 to 5.")
-
-# Prompt templates
-retrieval_prompt = PromptTemplate(
-    input_variables=["query"],
-    template="Given the query '{query}', determine if retrieval is necessary. Output only 'Yes' or 'No'."
-)
-
-relevance_prompt = PromptTemplate(
-    input_variables=["query", "context"],
-    template="Given the query '{query}' and the context '{context}', determine if the context is relevant. Output only 'Relevant' or 'Irrelevant'."
-)
-
-generation_prompt = PromptTemplate(
-    input_variables=["query", "context"],
-    template="Given the query '{query}' and the context '{context}', generate a response."
-)
-
-support_prompt = PromptTemplate(
-    input_variables=["response", "context"],
-    template="Given the response '{response}' and the context '{context}', determine if the response is supported by the context. Output 'Fully supported', 'Partially supported', or 'No support'."
-)
-
-utility_prompt = PromptTemplate(
-    input_variables=["query", "response"],
-    template="Given the query '{query}' and the response '{response}', rate the utility of the response from 1 to 5."
-)
+            response = "".join(
+                chunk.choices[0].delta.content or "" for chunk in completion
+            )
+            return response
+        except Exception as e:
+            raise Exception(f"Groq API Error: {e}")
 
 # SelfRAG class
 class SelfRAG:
-    def __init__(self, path, top_k=3):
+    def __init__(self, path, top_k=3, groq_client=None):
         self.vectorstore = encode_pdf(path)
         self.top_k = top_k
-        self.llm = CustomChatOpenAI(model="gpt-4o-mini")
+        self.groq_client = groq_client
 
     def run(self, query):
-        # Main logic for processing the query (adapted from your script)
-        print(f"Processing query: {query}")
+        # Retrieval and response logic
+        st.write("Processing query:", query)
 
-        # Implement retrieval, relevance, and generation logic
+        # Use retrieval logic as needed (e.g., self.vectorstore.similarity_search)
+        # For simplicity, we'll focus on direct response generation
         input_prompt = f"Query: {query}\n\nGenerate a response:"
-        response = self.llm.call_api(input_prompt)
+        response = self.groq_client.generate_response(input_prompt)
         return response
 
-
-# Streamlit App
-st.title("SelfRAG: Retrieval-Augmented Generation")
+# Streamlit app
+st.title("SelfRAG with Groq's Llama3 Model")
 
 # API Key Input
 st.sidebar.title("Configuration")
@@ -129,8 +76,14 @@ top_k = st.slider("Number of documents to retrieve:", min_value=1, max_value=10,
 if st.button("Run"):
     if uploaded_file and query and api_key:
         try:
-            rag = SelfRAG(path="uploaded.pdf", top_k=top_k)
+            # Initialize Groq client and SelfRAG
+            groq_client = GroqClient(model="llama3-8b-8192")
+            rag = SelfRAG(path="uploaded.pdf", top_k=top_k, groq_client=groq_client)
+            
+            # Process the query
             response = rag.run(query)
+            
+            # Display the response
             st.write("### Final Response")
             st.write(response)
         except Exception as e:
@@ -141,4 +94,4 @@ if st.button("Run"):
         st.warning("Please upload a PDF and enter a query.")
 
 # Notes
-st.write("This app uses Groq's API to process queries with Retrieval-Augmented Generation.")
+st.write("This app uses Groq's Llama3-8b-8192 model for Retrieval-Augmented Generation.")
