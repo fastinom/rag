@@ -1,12 +1,11 @@
 import streamlit as st
-import os
 from groq import Groq
-from helper_functions import encode_pdf  # Ensure helper_functions contains `encode_pdf`
+from helper_functions import encode_pdf  # Ensure this function is implemented
 
 # Custom Groq client wrapper
 class GroqClient:
-    def __init__(self, model, temperature=1, max_tokens=1024, top_p=1):
-        self.client = Groq()
+    def __init__(self, api_key, model, temperature=1, max_tokens=1024, top_p=1):
+        self.client = Groq(api_key=api_key)
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -52,11 +51,8 @@ st.title("SelfRAG with Groq's Llama3 Model")
 # API Key Input
 st.sidebar.title("Configuration")
 api_key = st.sidebar.text_input("Enter your Groq API Key:", type="password")
-if api_key:
-    os.environ["GROQ_API_KEY"] = api_key
-    st.sidebar.success("API Key set successfully!")
-else:
-    st.sidebar.warning("Please enter your Groq API Key.")
+if not api_key:
+    st.error("Please enter your Groq API Key in the sidebar.")
 
 # File upload
 uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"])
@@ -74,7 +70,7 @@ if st.button("Run"):
     if uploaded_file and query and api_key:
         try:
             # Initialize Groq client and SelfRAG
-            groq_client = GroqClient(model="llama3-8b-8192")
+            groq_client = GroqClient(api_key=api_key, model="llama3-8b-8192")
             rag = SelfRAG(path="uploaded.pdf", top_k=top_k, groq_client=groq_client)
             
             # Process the query
