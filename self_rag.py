@@ -1,8 +1,6 @@
 import streamlit as st
 import os
 from groq import Groq
-from langchain.prompts import PromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
 from helper_functions import encode_pdf  # Ensure helper_functions contains `encode_pdf`
 
 # Custom Groq client wrapper
@@ -40,7 +38,6 @@ class SelfRAG:
         self.groq_client = groq_client
 
     def run(self, query):
-        # Retrieval and response logic
         st.write("Processing query:", query)
 
         # Use retrieval logic as needed (e.g., self.vectorstore.similarity_search)
