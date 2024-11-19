@@ -1,106 +1,104 @@
 import streamlit as st
-from helper_functions import (
-    encode_pdf,
-    encode_from_string,
-    answer_question_from_context,
-    read_pdf_to_string,
-    create_question_answer_from_context_chain,
-    bm25_retrieval
-)
-from rank_bm25 import BM25Okapi
+from dotenv import load_dotenv
+from PyPDF2 import PdfReader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chat_models import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
+from htmlTemplates import css, bot_template, user_template
+from langchain.llms import HuggingFaceHub
 
-# Streamlit Page Setup
-st.set_page_config(page_title="PDF Summarizer with Q&A", layout="wide")
-st.title("PDF Summarizer and Q&A with Groq")
+def get_pdf_text(pdf_docs):
+    text = ""
+    for pdf in pdf_docs:
+        pdf_reader = PdfReader(pdf)
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+    return text
 
-# State Variables
-if "vectorstore" not in st.session_state:
-    st.session_state["vectorstore"] = None
 
-if "bm25" not in st.session_state:
-    st.session_state["bm25"] = None
-
-if "cleaned_texts" not in st.session_state:
-    st.session_state["cleaned_texts"] = None
-
-# Upload PDF
-uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
-
-# PDF Processing
-if uploaded_file:
-    st.write("Processing the PDF...")
-    pdf_path = uploaded_file.name
-    with open(pdf_path, "wb") as f:
-        f.write(uploaded_file.read())
-
-    # Extract text from PDF
-    pdf_content = read_pdf_to_string(pdf_path)
-
-    # Encode the PDF into vector store
-    with st.spinner("Encoding PDF into vector store..."):
-        st.session_state["vectorstore"] = encode_pdf(pdf_path)
-        st.success("Vector store created!")
-
-    # Prepare for BM25 retrieval
-    with st.spinner("Preparing BM25 retriever..."):
-        chunk_size = 1000
-        chunk_overlap = 200
-        st.session_state["bm25"] = BM25Okapi(pdf_content.split())
-        st.session_state["cleaned_texts"] = pdf_content.split()
-
-# Summarize PDF
-if st.session_state["vectorstore"]:
-    st.header("PDF Summarization")
-
-    # Summarize entire PDF or a given section
-    summarization_prompt = st.text_area(
-        "Enter a summarization prompt (optional):",
-        value="Summarize the uploaded document."
+def get_text_chunks(text):
+    text_splitter = CharacterTextSplitter(
+        separator="\n",
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len
     )
-    if st.button("Summarize"):
-        chain = create_question_answer_from_context_chain()
-        context = st.session_state["vectorstore"].similarity_search(summarization_prompt, k=5)
-        context_text = " ".join([doc.page_content for doc in context])
-        answer = answer_question_from_context(
-            summarization_prompt, context_text, chain
-        )
-        st.write("**Summary:**")
-        st.write(answer["answer"])
+    chunks = text_splitter.split_text(text)
+    return chunks
 
-# Question-Answering
-if st.session_state["vectorstore"]:
-    st.header("Question Answering")
 
-    # Enter question
-    question = st.text_input("Ask a question about the document:")
+def get_vectorstore(text_chunks):
+    embeddings = OpenAIEmbeddings()
+    # embeddings = HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-xl")
+    vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
+    return vectorstore
 
-    if st.button("Get Answer"):
-        chain = create_question_answer_from_context_chain()
-        # Retrieve context for the question
-        with st.spinner("Retrieving context..."):
-            context = st.session_state["vectorstore"].similarity_search(question, k=5)
-            context_text = " ".join([doc.page_content for doc in context])
 
-        # Generate answer using Groq
-        with st.spinner("Generating answer..."):
-            answer = answer_question_from_context(question, context_text, chain)
-            st.write("**Answer:**")
-            st.write(answer["answer"])
-            st.write("**Context:**")
-            st.write(answer["context"])
+def get_conversation_chain(vectorstore):
+    llm = ChatOpenAI()
+    # llm = HuggingFaceHub(repo_id="google/flan-t5-xxl", model_kwargs={"temperature":0.5, "max_length":512})
 
-# BM25 Search
-if st.session_state["bm25"]:
-    st.header("BM25 Context Retrieval")
+    memory = ConversationBufferMemory(
+        memory_key='chat_history', return_messages=True)
+    conversation_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory
+    )
+    return conversation_chain
 
-    bm25_query = st.text_input("Enter a query for BM25 search:")
 
-    if st.button("Retrieve BM25 Context"):
-        with st.spinner("Searching with BM25..."):
-            bm25_results = bm25_retrieval(
-                st.session_state["bm25"], st.session_state["cleaned_texts"], bm25_query
-            )
-            st.write("**Top Contexts:**")
-            for i, text in enumerate(bm25_results):
-                st.write(f"**Chunk {i + 1}:**")
-                st.write(text)
+def handle_userinput(user_question):
+    response = st.session_state.conversation({'question': user_question})
+    st.session_state.chat_history = response['chat_history']
+
+    for i, message in enumerate(st.session_state.chat_history):
+        if i % 2 == 0:
+            st.write(user_template.replace(
+                "{{MSG}}", message.content), unsafe_allow_html=True)
+        else:
+            st.write(bot_template.replace(
+                "{{MSG}}", message.content), unsafe_allow_html=True)
+
+
+def main():
+    load_dotenv()
+    st.set_page_config(page_title="Chat with multiple PDFs",
+                       page_icon=":books:")
+    st.write(css, unsafe_allow_html=True)
+
+    if "conversation" not in st.session_state:
+        st.session_state.conversation = None
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = None
+
+    st.header("Chat with multiple PDFs :books:")
+    user_question = st.text_input("Ask a question about your documents:")
+    if user_question:
+        handle_userinput(user_question)
+
+    with st.sidebar:
+        st.subheader("Your documents")
+        pdf_docs = st.file_uploader(
+            "Upload your PDFs here and click on 'Process'", accept_multiple_files=True)
+        if st.button("Process"):
+            with st.spinner("Processing"):
+                # get pdf text
+                raw_text = get_pdf_text(pdf_docs)
+
+                # get the text chunks
+                text_chunks = get_text_chunks(raw_text)
+
+                # create vector store
+                vectorstore = get_vectorstore(text_chunks)
+
+                # create conversation chain
+                st.session_state.conversation = get_conversation_chain(
+                    vectorstore)
+
+
+if __name__ == '__main__':
+    main()
