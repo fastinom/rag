@@ -183,6 +183,7 @@ SQLAlchemy==2.0.34
 srsly==2.4.8
 stack-data==0.6.3
 striprtf==0.0.26
+streamlit==1.18.1
 sympy==1.13.2
 tabulate==0.9.0
 tenacity==8.4.2
