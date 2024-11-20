@@ -40,7 +40,7 @@ def get_text_chunks(text):
 def get_vectorstore(text_chunks):
     """Create a vector store from text chunks using Hugging Face embeddings."""
     embeddings = HuggingFaceHubEmbeddings(
-        repo_id="sentence-transformers/all-mpnet-base-v2",  # Replace with your embedding model endpoint
+        repo_id="sentence-transformers/all-MiniLM-L6-v2",  # Replace with your embedding model endpoint
         huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
     )
     vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
