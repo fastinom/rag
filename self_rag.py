@@ -13,7 +13,6 @@ from htmlTemplates import css, bot_template, user_template
 # Load the Hugging Face API token from the environment
 load_dotenv()
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
-EMBEDDING_ENDPOINT = "https://lbjh5drgvu0svrwz.us-east-1.aws.endpoints.huggingface.cloud"  # Replace with your embedding model's endpoint URL
 
 
 def get_pdf_text(pdf_docs):
@@ -41,7 +40,7 @@ def get_text_chunks(text):
 def get_vectorstore(text_chunks):
     """Create a vector store from text chunks using Hugging Face embeddings."""
     embeddings = HuggingFaceHubEmbeddings(
-        model_url=EMBEDDING_ENDPOINT,  # Use explicit endpoint URL for embeddings
+        repo_id="sentence-transformers/all-mpnet-base-v2",  # Replace with your embedding model endpoint
         huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
     )
     vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
@@ -51,7 +50,7 @@ def get_vectorstore(text_chunks):
 def get_conversation_chain(vectorstore):
     """Set up the conversational chain with a Hugging Face LLM."""
     llm = HuggingFaceHub(
-        repo_id="google/flan-t5-xxl",  # Specify repo_id for the LLM
+        repo_id="google/flan-t5-xxl",  # Replace with your Hugging Face model endpoint for LLM
         model_kwargs={"temperature": 0.5, "max_length": 512},
         huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
     )
