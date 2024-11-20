@@ -1,16 +1,3 @@
-langchain-community==0.0.5  # Replacing langchain with the newer community version
-langchain-core>=0.3.15,<0.4.0  # Core version required by text-splitters
-PyPDF2==3.0.1
-python-dotenv==1.0.0  # Uncomment if environment variables are needed
+
 streamlit==1.18.1
-openai==0.27.6
-faiss-cpu==1.7.4
-altair==4.2.2  # Updated version to avoid potential issues
-tiktoken==0.4.0
 
-# For Hugging Face LLMs
-huggingface-hub==0.14.1
-
-# For Instructor Embeddings
-InstructorEmbedding==1.0.1
-sentence-transformers==2.2.2
