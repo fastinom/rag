@@ -1,1 +1,1 @@
-langchain
+sentence_transformers
