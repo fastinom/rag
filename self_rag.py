@@ -2,15 +2,22 @@ import streamlit as st
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
+from langchain.embeddings import HuggingFaceHubEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.chat_models import ChatOpenAI
+from langchain.llms import HuggingFaceHub
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
+import os
 from htmlTemplates import css, bot_template, user_template
-from langchain.llms import HuggingFaceHub
+
+# Load the Hugging Face API token from the environment
+load_dotenv()
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
+EMBEDDING_ENDPOINT = "https://lbjh5drgvu0svrwz.us-east-1.aws.endpoints.huggingface.cloud"  # Replace with your embedding model's endpoint URL
+
 
 def get_pdf_text(pdf_docs):
+    """Extract text from uploaded PDF documents."""
     text = ""
     for pdf in pdf_docs:
         pdf_reader = PdfReader(pdf)
@@ -20,6 +27,7 @@ def get_pdf_text(pdf_docs):
 
 
 def get_text_chunks(text):
+    """Split text into smaller chunks for processing."""
     text_splitter = CharacterTextSplitter(
         separator="\n",
         chunk_size=1000,
@@ -31,15 +39,22 @@ def get_text_chunks(text):
 
 
 def get_vectorstore(text_chunks):
-    # embeddings = OpenAIEmbeddings()
-    embeddings = HuggingFaceInstructEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+    """Create a vector store from text chunks using Hugging Face embeddings."""
+    embeddings = HuggingFaceHubEmbeddings(
+        model_url=EMBEDDING_ENDPOINT,  # Use explicit endpoint URL for embeddings
+        huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
+    )
     vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
     return vectorstore
 
 
 def get_conversation_chain(vectorstore):
-    # llm = ChatOpenAI()
-    llm = HuggingFaceHub(repo_id="google/flan-t5-xxl", model_kwargs={"temperature":0.5, "max_length":512})
+    """Set up the conversational chain with a Hugging Face LLM."""
+    llm = HuggingFaceHub(
+        repo_id="google/flan-t5-xxl",  # Specify repo_id for the LLM
+        model_kwargs={"temperature": 0.5, "max_length": 512},
+        huggingfacehub_api_token=HUGGINGFACE_API_TOKEN
+    )
 
     memory = ConversationBufferMemory(
         memory_key='chat_history', return_messages=True)
@@ -52,6 +67,7 @@ def get_conversation_chain(vectorstore):
 
 
 def handle_userinput(user_question):
+    """Handle user questions and generate responses."""
     response = st.session_state.conversation({'question': user_question})
     st.session_state.chat_history = response['chat_history']
 
@@ -65,7 +81,7 @@ def handle_userinput(user_question):
 
 
 def main():
-    load_dotenv()
+    """Main function to run the Streamlit app."""
     st.set_page_config(page_title="Chat with multiple PDFs",
                        page_icon=":books:")
     st.write(css, unsafe_allow_html=True)
@@ -86,16 +102,16 @@ def main():
             "Upload your PDFs here and click on 'Process'", accept_multiple_files=True)
         if st.button("Process"):
             with st.spinner("Processing"):
-                # get pdf text
+                # Get PDF text
                 raw_text = get_pdf_text(pdf_docs)
 
-                # get the text chunks
+                # Get the text chunks
                 text_chunks = get_text_chunks(raw_text)
 
-                # create vector store
+                # Create vector store
                 vectorstore = get_vectorstore(text_chunks)
 
-                # create conversation chain
+                # Create conversation chain
                 st.session_state.conversation = get_conversation_chain(
                     vectorstore)
 
