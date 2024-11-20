@@ -1,4 +1,5 @@
-sentence_transformers
+#sentence_transformers
+streamlit
 python-dotenv==1.0.0
 PyPDF2==3.0.1
 langchain
