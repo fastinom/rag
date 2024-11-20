@@ -3,3 +3,4 @@ python-dotenv==1.0.0
 PyPDF2==3.0.1
 langchain
 langchain-community==0.0.5
+huggingface-hub==0.14.1
